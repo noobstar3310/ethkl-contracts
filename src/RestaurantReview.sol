@@ -1,27 +1,46 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.0;
+pragma solidity ^0.8.9;
 
 contract RestaurantReview {
-    // Struct to store a reviews
-    struct Review {
-        address reviewer; // The address of the reviewer
-        string reviewText; // The actual reviews text
-        int256 votes; // Net votes (upvotes - downvotes)
-        mapping(address => bool) voters; // Track if a user has voted on this reviews
-    }
-
-    // Struct to store Restaurant details
     struct Restaurant {
         uint256 id;
         string name;
-        mapping(address => bool) hasReviewed; // Tracks if an address has reviewed this restaurant
-        Review[] reviews; // Array of reviews for this restaurant
+        mapping(address => bool) hasReviewed;
+        Review[] reviews;
     }
 
-    // Fixed list of restaurants
     Restaurant[4] public restaurants;
 
-    // Constructor to initialize four restaurants with fixed names
+    struct Review {
+        address reviewer;
+        string reviewText;
+        string imageLink;
+        int256 voteCount; // Can be negative, hence int256 is used
+        uint256 timestamp;
+    }
+
+    struct User {
+        uint256 level; // Level 1, 2, or 3
+        uint256 exp;
+    }
+
+    mapping(address => User) public users;
+
+    event ReviewSubmitted(
+        uint256 indexed restaurantId,
+        address indexed reviewer,
+        string reviewText,
+        string imageLink
+    );
+    event ReviewVoted(
+        uint256 indexed restaurantId,
+        uint256 indexed reviewIndex,
+        address indexed voter,
+        int256 newVoteCount
+    );
+
+    event UserLeveledUp(address indexed user, uint256 newLevel);
+
     constructor() {
         restaurants[0].id = 0;
         restaurants[0].name = "Bistro Delight";
@@ -36,108 +55,197 @@ contract RestaurantReview {
         restaurants[3].name = "Urban Tastes";
     }
 
-    // Modifier to check if the user has already reviewed a restaurant
-    modifier hasNotReviewed(uint256 restaurantId) {
+    // Function to submit a reviews for a restaurant
+    function submitReview(
+        uint256 _restaurantId,
+        string memory _reviewText,
+        string memory _imageLink
+    ) public {
         require(
-            !restaurants[restaurantId].hasReviewed[msg.sender],
-            "You have already reviewed this restaurant."
+            _restaurantId >= 0 && _restaurantId <= 2,
+            "Invalid restaurant ID"
         );
-        _;
+        Restaurant storage restaurant = restaurants[_restaurantId];
+
+        // Check if user has reviewed before and if 5 minutes have passed
+        for (uint256 i = 0; i < restaurant.reviews.length; i++) {
+            if (restaurant.reviews[i].reviewer == msg.sender) {
+                require(
+                    block.timestamp >=
+                        restaurant.reviews[i].timestamp + 5 minutes,
+                    "You can only review again after 5 minutes"
+                );
+            }
+        }
+
+        // Create new review
+        restaurant.reviews.push(
+            Review({
+                reviewer: msg.sender,
+                reviewText: _reviewText,
+                imageLink: _imageLink,
+                voteCount: 0,
+                timestamp: block.timestamp
+            })
+        );
+
+        restaurant.hasReviewed[msg.sender] = true;
+
+        emit ReviewSubmitted(
+            _restaurantId,
+            msg.sender,
+            _reviewText,
+            _imageLink
+        );
     }
 
-    // Modifier to check if the user is not the review owner
-    modifier isNotReviewOwner(address reviewer) {
-        require(msg.sender != reviewer, "You cannot vote on your own review.");
-        _;
-    }
-
-    // Function for a user to add a reviews to a restaurant
-    function addReview(
-        uint256 restaurantId,
-        string memory reviewText
-    ) external hasNotReviewed(restaurantId) {
-        require(restaurantId < 4, "Invalid restaurant ID.");
-
-        // Create a new reviews instance
-        Review storage newReview = restaurants[restaurantId].reviews.push();
-        newReview.reviewer = msg.sender;
-        newReview.reviewText = reviewText;
-        newReview.votes = 0;
-
-        // Mark that the user has reviewed this restaurant
-        restaurants[restaurantId].hasReviewed[msg.sender] = true;
-    }
-
-    // Function for a user to upvote or downvote a reviews
-    function voteOnReview(
-        uint256 restaurantId,
-        uint256 reviewIndex,
-        bool upvote
-    ) external {
-        require(restaurantId < 4, "Invalid restaurant ID.");
+    // Function to vote on a review and update user's level and EXP
+    function voteReview(
+        uint256 _restaurantId,
+        uint256 _reviewIndex,
+        bool _isUpvote
+    ) public {
         require(
-            reviewIndex < restaurants[restaurantId].reviews.length,
-            "Invalid review index."
+            _restaurantId >= 0 && _restaurantId <= 3,
+            "Invalid restaurant ID"
+        );
+        Restaurant storage restaurant = restaurants[_restaurantId];
+        require(
+            _reviewIndex < restaurant.reviews.length,
+            "Invalid review index"
         );
 
-        Review storage review = restaurants[restaurantId].reviews[reviewIndex];
-
-        // Ensure the voter is not the reviews owner
+        Review storage review = restaurant.reviews[_reviewIndex];
         require(
-            msg.sender != review.reviewer,
-            "You cannot vote on your own review."
+            review.reviewer != msg.sender,
+            "Review owner cannot vote on their own review"
         );
 
-        // Ensure the user hasn't voted before
-        require(
-            !review.voters[msg.sender],
-            "You have already voted on this review."
-        );
+        // Determine user influence level
+        uint256 userLevel = users[msg.sender].level;
 
-        // Record the user's vote
-        review.voters[msg.sender] = true;
+        // Default level to 1 if the user is not yet registered or has no level set
+        if (userLevel == 0) {
+            userLevel = 1;
+        }
 
-        // Update the vote count
-        if (upvote) {
-            review.votes += 1;
+        // Calculate vote value based on user level
+        int256 voteValue = int256(userLevel); // Level 1 = 1 point, Level 2 = 2 points, Level 3 = 3 points
+        if (!_isUpvote) {
+            voteValue = -voteValue;
+        }
+
+        // Update the review's vote count
+        review.voteCount += voteValue;
+
+        // Vote logic: update reviewer's experience points
+        if (_isUpvote) {
+            // Upvote logic: Increase experience points
+            users[review.reviewer].exp += 1;
         } else {
-            review.votes -= 1;
+            // Downvote logic: Decrease experience points
+            require(review.voteCount >= 0, "Vote count cannot go below zero"); // Ensure vote count doesn't go below zero
+            if (users[review.reviewer].exp > 0) {
+                users[review.reviewer].exp -= 1;
+            }
+
+            // Check if the user is above level 1 before decreasing EXP
+            if (
+                users[review.reviewer].level > 1 &&
+                users[review.reviewer].exp > 0
+            ) {
+                users[review.reviewer].exp -= 1; // Lose 1 more EXP for the reviewer on downvote
+            }
         }
+
+        // Check for level up for the reviewer after upvote/downvote
+        if (users[review.reviewer].exp >= 10) {
+            users[review.reviewer].level += 1; // Level up
+            users[review.reviewer].exp = 0; // Reset EXP after leveling up
+            emit UserLeveledUp(review.reviewer, users[review.reviewer].level);
+        }
+
+        // Emit the vote event with updated information
+        emit ReviewVoted(
+            _restaurantId,
+            _reviewIndex,
+            msg.sender,
+            review.voteCount
+        );
     }
 
-    // Function to get all reviews for a restaurant
-    function getReviews(
-        uint256 restaurantId
+    // Function to get restaurant reviews
+    function getRestaurantReviews(
+        uint256 _restaurantId
+    ) public view returns (Review[] memory) {
+        require(
+            _restaurantId >= 0 && _restaurantId <= 2,
+            "Invalid restaurant ID"
+        );
+        return restaurants[_restaurantId].reviews;
+    }
+
+    // Function to get all reviews for a restaurant including net votes
+    function getAllReviewsForRestaurant(
+        uint256 _restaurantId
     )
-        external
+        public
         view
-        returns (string[] memory, address[] memory, int256[] memory)
+        returns (
+            address[] memory reviewers,
+            string[] memory reviewTexts,
+            string[] memory imageLinks,
+            int256[] memory voteCounts,
+            uint256[] memory timestamps
+        )
     {
-        require(restaurantId < 4, "Invalid restaurant ID.");
-        uint256 reviewCount = restaurants[restaurantId].reviews.length;
+        require(
+            _restaurantId >= 0 && _restaurantId <= 3,
+            "Invalid restaurant ID"
+        );
 
-        // Arrays to store review data
-        string[] memory reviewTexts = new string[](reviewCount);
-        address[] memory reviewers = new address[](reviewCount);
-        int256[] memory voteCounts = new int256[](reviewCount);
+        Restaurant storage restaurant = restaurants[_restaurantId];
+        uint256 reviewCount = restaurant.reviews.length;
 
-        // Populate the arrays with the review data
+        // Initialize arrays to store data
+        reviewers = new address[](reviewCount);
+        reviewTexts = new string[](reviewCount);
+        imageLinks = new string[](reviewCount);
+        voteCounts = new int256[](reviewCount);
+        timestamps = new uint256[](reviewCount);
+
+        // Loop through all reviews and populate the arrays
         for (uint256 i = 0; i < reviewCount; i++) {
-            Review storage review = restaurants[restaurantId].reviews[i];
-            reviewTexts[i] = review.reviewText;
+            Review storage review = restaurant.reviews[i];
             reviewers[i] = review.reviewer;
-            voteCounts[i] = review.votes;
+            reviewTexts[i] = review.reviewText;
+            imageLinks[i] = review.imageLink;
+            voteCounts[i] = review.voteCount;
+            timestamps[i] = review.timestamp;
         }
-
-        return (reviewTexts, reviewers, voteCounts);
     }
 
-    // Function to get restaurant details by ID
-    function getRestaurant(
-        uint256 restaurantId
-    ) external view returns (string memory name, uint256 reviewCount) {
-        require(restaurantId < 4, "Invalid restaurant ID.");
-        Restaurant storage restaurant = restaurants[restaurantId];
-        return (restaurant.name, restaurant.reviews.length);
+    // Function to set user level (for testing purpose, normally this should be restricted)
+    function setUserLevel(address _user, uint256 _level) public {
+        require(_level >= 1 && _level <= 3, "Level must be between 1 and 3");
+        users[_user].level = _level;
+    }
+
+    // Retrieve user details
+    function getUser(
+        address _user
+    ) public view returns (uint256 level, uint256 exp) {
+        User storage user = users[_user];
+        return (user.level, user.exp);
+    }
+
+    // Register a new user
+    function registerUser() public {
+        require(users[msg.sender].level == 0, "User already registered"); // Check if user is already registered
+
+        users[msg.sender] = User({
+            level: 1, // Start at level 1
+            exp: 0 // Start with 0 EXP
+        });
     }
 }
