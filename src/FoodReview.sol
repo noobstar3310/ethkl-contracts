@@ -1,16 +1,20 @@
-// SPDX License-Identifier: MIT
-pragma solidity ^0.8.19;
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.9;
 
-contract Contract{
+import "./VoucherNFT.sol"; // Import the ERC721 contract
+import "./BadgeNFT.sol"; // Import the ERC1155 contract
+
+contract FoodReview {
     address public owner;
-    //VoucherNFT public voucherContract;
-    //BadgeNFT public badgeContract;
+    VoucherNFT public voucherContract;
+    BadgeNFT public badgeContract;
 
     struct Restaurant {
         string name;
         string description;
         string location;
         string foodCategory;
+        string image; // Field for storing the image URL
         uint256 expLevel;
         uint256 totalVotes;
         bool isLevelUp;
@@ -33,15 +37,16 @@ contract Contract{
     constructor(address _voucherAddress, address _badgeAddress) {
         owner = msg.sender;
         voucherContract = VoucherNFT(_voucherAddress); // ERC721 instance
-        badgeContract = BadgeNFT(_badgeAddress);       // ERC1155 instance
+        badgeContract = BadgeNFT(_badgeAddress); // ERC1155 instance
     }
 
-    // Create a new restaurant
+    // Create a new restaurant with image
     function createRestaurant(
         string memory _name,
         string memory _description,
         string memory _location,
-        string memory _foodCategory
+        string memory _foodCategory,
+        string memory _image // Parameter for the image URL
     ) public {
         restaurantCount++;
         restaurants[restaurantCount] = Restaurant({
@@ -49,6 +54,7 @@ contract Contract{
             description: _description,
             location: _location,
             foodCategory: _foodCategory,
+            image: _image, // Store the image URL on-chain
             expLevel: 1,
             totalVotes: 0,
             isLevelUp: false
@@ -69,24 +75,32 @@ contract Contract{
         if (restaurant.totalVotes == 3) {
             restaurant.expLevel++;
             restaurant.isLevelUp = true;
-            badgeContract.mintBadge(msg.sender, 1, 1); // Mint badge
+            badgeContract.mintBadge(msg.sender, 1); // Mint tier 1 badge
             emit RestaurantLeveledUp(_restaurantId, restaurant.expLevel);
         }
     }
 
-    // Revview a restaurant
-    function reviewRestaurant(uint256 _restaurantId, string memory _review) public {
+    // Review a restaurant
+    function reviewRestaurant(
+        uint256 _restaurantId,
+        string memory _review
+    ) public {
         restaurantReviews[_restaurantId].push(_review);
         emit ReviewSubmitted(_restaurantId, _review);
     }
 
     // Mint voucher for users
-    function rewardUserWithVoucher(address _user, string memory _voucherURI) public {
+    function rewardUserWithVoucher(
+        address _user,
+        string memory _voucherURI
+    ) public {
         voucherContract.mintVoucher(_user, _voucherURI); // Mint voucher
     }
 
     // Retrieve restaurant details
-    function getRestaurant(uint256 _restaurantId) public view returns (Restaurant memory) {
+    function getRestaurant(
+        uint256 _restaurantId
+    ) public view returns (Restaurant memory) {
         return restaurants[_restaurantId];
     }
 }
