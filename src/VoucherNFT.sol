@@ -5,7 +5,6 @@ import "node_modules/@openzeppelin/contracts/token/ERC721/ERC721.sol";
 
 contract VoucherNFT is ERC721 {
     uint256 private _nextVoucherId = 1; // Start at 1 for the voucher ID
-    mapping(uint256 => string) private _voucherURIs;
 
     constructor() ERC721("VoucherNFT", "VNFT") {}
 
@@ -23,31 +22,18 @@ contract VoucherNFT is ERC721 {
     // Function to retrieve both the IDs and URIs of vouchers owned by a specific address
     function vouchersOfOwner(
         address owner
-    ) public view returns (uint256[] memory, string[] memory) {
+    ) public view returns (uint256[] memory) {
         uint256 voucherCount = balanceOf(owner);
         uint256[] memory voucherIds = new uint256[](voucherCount);
-        string[] memory voucherURIs = new string[](voucherCount);
         uint256 counter = 0;
 
         // Iterate from 1 to the current highest voucher ID
         for (uint256 i = 1; i < _nextVoucherId; i++) {
-            if (bytes(_voucherURIs[i]).length != 0 && ownerOf(i) == owner) {
-                // Check if the URI exists (to determine if the voucher has been minted)
+            if (ownerOf(i) == owner) {
                 voucherIds[counter] = i;
-                voucherURIs[counter] = _voucherURIs[i];
                 counter++;
             }
         }
-
-        return (voucherIds, voucherURIs);
-    }
-
-    // Function to retrieve the URI of a specific voucher
-    function voucherURI(uint256 voucherId) public view returns (string memory) {
-        require(
-            bytes(_voucherURIs[voucherId]).length != 0,
-            "Voucher does not exist"
-        );
-        return _voucherURIs[voucherId];
+        return voucherIds;
     }
 }
